@@ -14,8 +14,8 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -136,6 +136,8 @@ celerybeat.pid
 
 # Environments
 .env
+.env.*
+!.env.example
 .envrc
 .venv
 env/
@@ -205,3 +207,27 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Next.js / Node.js (App Router)
+node_modules/
+.next/
+out/
+.turbo/
+.vercel/
+*.tsbuildinfo
+.swc/
+
+# Node / package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Local AI / embeddings caches (LangChain, Chroma, etc.)
+.chroma/
+chroma.sqlite3
+.langchain/
