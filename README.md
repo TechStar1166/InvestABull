@@ -1,60 +1,148 @@
-# Multi-Agent Equity Research Assistant
+# InvestABull
 
-**Agentic AI - Spring 2026 Project Kickoff**
+Multi-agent equity research platform with:
+- **FastAPI backend** (specialist pipeline + coordinator synthesis + SSE stream)
+- **Next.js frontend** (live trace dashboard + markdown memo rendering)
 
-This repository contains the source code for the **Multi-Agent Equity Research Assistant**, an institutional-grade AI application designed to replace monolithic LLM reasoning with a transparent, collaborative multi-agent workflow. 
-
-By inputting a stock ticker, the system delegates specialized financial analysis tasks to distinct AI agents (Price, Filings, News, Macro) and synthesizes their findings into a structured, evidence-based investment memo. The application features a visible "Agent Trace Log" UI to ensure all logical deductions are highly traceable and auditable.
-
----
-
-## Architecture & Tech Stack
-
-This project utilizes a **Hybrid Multi-Model Architecture** to optimize for both high-volume data retrieval and elite logical synthesis.
-
-### The "Brain" (AI Models & Orchestration)
-* **Framework:** [CrewAI](https://www.crewai.com/)
-* **Specialist Agents (High Volume / Retrieval):** Google Gemini 2.5 Flash
-* **Coordinator Agent (Complex Synthesis / Logic):** Anthropic Claude 3.5 Sonnet
-
-### The Data Pipeline (APIs & Tools)
-* **Price & Quantitative:** `yfinance`
-* **SEC Filings & Risks:** SEC EDGAR Database + ChromaDB (Vector Search / RAG)
-* **News & Sentiment:** Tavily Agentic Search API
-* **Macroeconomics:** FRED API (Federal Reserve Economic Data)
-
-### The Application Layer
-* **Frontend:** Next.js (App Router), React, Tailwind CSS
-* **Backend:** FastAPI, Python, Pydantic
-* **Development Environment:** Cursor IDE
+Input a ticker (for example, `AAPL`) and the system runs specialist analysis across price, filings, news, and macro context, then synthesizes a final investment memo.
 
 ---
 
-## Team Roles & Delegation
+## Architecture Overview
 
-To ensure clean execution and avoid merge conflicts, development is strictly divided into three distinct engineering domains:
+### Backend (`backend/`)
+- **API layer**: `backend/main.py` (health, research, and SSE endpoints)
+- **Streaming orchestration bridge**: `backend/crew_logic.py`
+- **Modular pipeline**: `backend/app/services/pipeline.py`
+- **Coordinator synthesis**: `backend/app/services/coordinator_synthesis.py`
+- **Configuration**: `backend/app/config.py`
 
-* **[Name 1] - Frontend & Visualization Engineer**
-  * *Domain:* Next.js UI, Tailwind CSS, State Management.
-  * *Responsibilities:* Building the dark-mode dashboard, managing asynchronous state for the live "Agent Trace Log," and formatting the final Markdown output.
-* **AG - AI Orchestration Lead**
-  * *Domain:* FastAPI Backend, CrewAI Routing, Coordinator Prompting.
-  * *Responsibilities:* Managing the API endpoints, defining the CrewAI agent topology, and tuning the Claude 3.5 Sonnet Coordinator Agent for conflict resolution.
-* **[Name 3] - Data Engineering & API Specialist**
-  * *Domain:* Data Pipelines, RAG, Specialist Agent Prompting.
-  * *Responsibilities:* Building external tools (yfinance, Tavily, FRED), setting up ChromaDB for SEC filings, and ensuring the Gemini agents return clean, structured data.
+### Frontend (`frontend/`)
+- **App Router UI**: `frontend/src/app/page.tsx`
+- **SSE client**: `frontend/src/lib/api.ts`
+- **Styling**: Tailwind + custom markdown styles in `frontend/src/app/globals.css`
 
 ---
 
-## Getting Started (Local Development)
+## Repository Structure
 
-### 1. Prerequisites
-You will need API keys from the following providers. **NEVER COMMIT THESE KEYS TO GITHUB.**
-* [Google AI Studio](https://aistudio.google.com/) (Gemini)
-* [Anthropic Console](https://console.anthropic.com/) (Claude)
-* [Tavily](https://tavily.com/) (Search)
+```text
+InvestABull/
+├── README.md
+├── backend/
+│   ├── main.py
+│   ├── crew_logic.py
+│   ├── requirements.txt
+│   ├── .env.example
+│   ├── .env                # local only; do not commit
+│   ├── app/
+│   │   ├── config.py
+│   │   ├── agents/
+│   │   ├── tools/
+│   │   ├── services/
+│   │   ├── schemas/
+│   │   └── rag/
+│   └── tests/
+└── frontend/
+    ├── package.json
+    ├── .env.local          # local only; do not commit
+    ├── src/
+    │   ├── app/
+    │   └── lib/
+    └── public/
+```
 
-### 2. Clone the Repository
+---
+
+## Environment Variables
+
+### Backend env file
+Create `backend/.env` from `backend/.env.example` and populate keys.
+
+Required for full flow:
+- `GEMINI_API_KEY`
+- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_MODEL` (recommended: `claude-sonnet-4-6`)
+- `TAVILY_API_KEY`
+
+Recommended:
+- `FRED_API_KEY` (improves macro specialist output)
+
+Common optional settings (defaults in `backend/app/config.py`):
+- `SEC_EDGAR_USER_AGENT`
+- `CHROMA_PERSIST_DIR`
+- `SEC_FILINGS_CACHE_DIR`
+- `EMBEDDING_MODEL`
+- `LOG_LEVEL`
+- `HTTP_TIMEOUT_SECONDS`
+- `HTTP_MAX_RETRIES`
+
+### Frontend env file
+Create `frontend/.env.local`:
+
 ```bash
-git clone [https://github.com/YOUR_GITHUB_USERNAME/equity-research-assistant.git](https://github.com/YOUR_GITHUB_USERNAME/equity-research-assistant.git)
-cd equity-research-assistant
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+```
+
+---
+
+## Backend Quickstart
+
+From repo root:
+
+```bash
+cd backend
+
+# Python 3.12 recommended
+python3.12 -m venv .venv
+source .venv/bin/activate
+
+pip install -r requirements.txt
+
+# First-time setup
+cp .env.example .env
+# edit .env and add your real keys
+
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Backend should be available at `http://127.0.0.1:8000`.
+
+---
+
+## Frontend Quickstart
+
+From repo root (separate terminal):
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Frontend runs at `http://localhost:3000` (or next available port if 3000 is in use).
+
+---
+
+## Live Streaming Test (SSE)
+
+With backend running:
+
+```bash
+curl -N -X POST http://127.0.0.1:8000/api/research/stream \
+  -H "Content-Type: application/json" \
+  -d '{"ticker":"AAPL"}'
+```
+
+A successful run streams multiple `data:` events and ends with a `Memo Ready` event whose `meta` includes:
+- `memo` (markdown report)
+- `coordinator` (expected `"claude"` when Anthropic model succeeds)
+
+---
+
+## Production Notes
+
+- Never commit `.env` or `.env.local` files with secrets.
+- Keep API keys provider-scoped and rotate if exposed.
+- If Anthropic model IDs change, update `ANTHROPIC_MODEL` in `backend/.env`.
+- For local debugging, use backend logs plus frontend raw trace panel to inspect event flow.
