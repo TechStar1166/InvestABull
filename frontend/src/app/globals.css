@@ -95,13 +95,14 @@ body {
   padding: 0.05rem 0.35rem;
 }
 
-/* Dark memo pane (streaming dashboard) */
+/* Dark memo pane (upgraded professional report styling) */
 .memo-dark {
   font-size: 0.95rem;
-  line-height: 1.75;
-  color: #e2e8f0;
+  line-height: 1.7;
+  color: #cbd5f5;
 }
 
+/* Headings */
 .memo-dark h1,
 .memo-dark h2,
 .memo-dark h3,
@@ -109,50 +110,83 @@ body {
   font-family: Georgia, Cambria, "Times New Roman", Times, serif;
   letter-spacing: -0.02em;
   color: #f8fafc;
-  margin-top: 1.35rem;
-  margin-bottom: 0.55rem;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
   font-weight: 600;
 }
 
 .memo-dark h1 {
-  font-size: 1.65rem;
+  font-size: 1.75rem;
+  margin-bottom: 0.75rem;
 }
+
 .memo-dark h2 {
-  font-size: 1.35rem;
+  font-size: 1.2rem;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  padding-bottom: 0.25rem;
+  margin-top: 2rem;
 }
+
+/* NEW: section grouping */
+.memo-dark h2 + p,
+.memo-dark h2 + ul,
+.memo-dark h2 + ol {
+  margin-top: 0.75rem;
+}
+
 .memo-dark h3 {
-  font-size: 1.12rem;
+  font-size: 1.05rem;
 }
 
+/* Make first section (Executive Summary) pop */
+.memo-dark h2:first-of-type + p {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  padding: 0.75rem 0.9rem;
+  border-radius: 8px;
+}
+
+/* Paragraphs */
 .memo-dark p {
-  margin-top: 0.65rem;
-  margin-bottom: 0.65rem;
+  margin: 0.65rem 0;
+  line-height: 1.65;
 }
 
+/* Lists */
 .memo-dark ul,
 .memo-dark ol {
   margin: 0.65rem 0;
-  padding-left: 1.35rem;
+  padding-left: 1.25rem;
 }
 
 .memo-dark li {
-  margin: 0.3rem 0;
+  margin: 0.35rem 0;
 }
 
+/* Blockquotes */
 .memo-dark blockquote {
   border-left: 3px solid #475569;
-  margin: 0.85rem 0;
-  padding-left: 0.85rem;
+  margin: 0.9rem 0;
+  padding-left: 0.9rem;
   color: #94a3b8;
 }
 
+/* Inline code / metrics highlight */
 .memo-dark code {
-  background: #1e293b;
+  background: rgba(16, 185, 129, 0.1);
+  color: #34d399;
   border-radius: 4px;
-  padding: 0.08rem 0.35rem;
+  padding: 0.1rem 0.4rem;
   font-size: 0.88em;
 }
 
+/* Bold emphasis */
 .memo-dark strong {
   color: #f1f5f9;
+}
+
+/* Subtle section spacing improvement */
+.memo-dark hr {
+  border-color: rgba(148, 163, 184, 0.2);
+  margin: 1.2rem 0;
 }
