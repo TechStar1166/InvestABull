@@ -63,6 +63,41 @@ class ChromaStore:
     def count(self) -> int:
         return self._collection.count()
 
+    def has_ticker(self, ticker: str) -> bool:
+        """Return ``True`` iff at least one chunk for ``ticker`` is already stored.
+
+        Used by the pipeline to skip the (expensive) 10-K download + chunk +
+        embed cycle when the ticker has already been ingested by a prior run
+        or by an out-of-band pre-ingestion job.
+        """
+        if not ticker or not isinstance(ticker, str):
+            return False
+        symbol = ticker.strip().upper()
+        if not symbol:
+            return False
+        try:
+            res = self._collection.get(where={"ticker": symbol}, limit=1)
+        except Exception:  # noqa: BLE001 - any backend error means "unknown"
+            logger.exception("has_ticker lookup failed for %s", symbol)
+            return False
+        ids = (res or {}).get("ids") or []
+        return bool(ids)
+
+    def ticker_chunk_count(self, ticker: str) -> int:
+        """Count how many chunks are stored for ``ticker`` (0 if unknown)."""
+        if not ticker:
+            return 0
+        symbol = ticker.strip().upper()
+        if not symbol:
+            return 0
+        try:
+            res = self._collection.get(where={"ticker": symbol})
+        except Exception:  # noqa: BLE001
+            logger.exception("ticker_chunk_count lookup failed for %s", symbol)
+            return 0
+        ids = (res or {}).get("ids") or []
+        return len(ids)
+
     def upsert(self, chunks: list[FilingChunk]) -> int:
         """Insert-or-update a batch of chunks. Returns the number upserted."""
         if not chunks:

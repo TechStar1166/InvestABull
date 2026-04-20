@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     embedding_model: str = Field(
         default="sentence-transformers/all-MiniLM-L6-v2", alias="EMBEDDING_MODEL"
     )
+    filings_read_only: bool = Field(
+        default=False,
+        alias="FILINGS_READ_ONLY",
+        description=(
+            "When true, the /research request path never ingests 10-Ks on demand; "
+            "it only queries Chroma. Tickers that were not pre-ingested return "
+            "a NO_DATA filings envelope. Use this in production with a scheduled "
+            "pre-ingestion job (see `python -m app.rag.cli ingest ...`)."
+        ),
+    )
 
     # Runtime
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")

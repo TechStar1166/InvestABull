@@ -212,3 +212,66 @@ def test_openapi_schema_advertises_endpoint(client):
     spec = r.json()
     assert "/research" in spec["paths"]
     assert "/health" in spec["paths"]
+    assert "/api/filings/ingest" in spec["paths"]
+
+
+# ---------------------------------------------------------------------------
+# /api/filings/ingest
+# ---------------------------------------------------------------------------
+
+
+def test_filings_ingest_endpoint_happy_and_skip_paths(monkeypatch):
+    """Mix of fresh / already-present / invalid tickers round-trips cleanly."""
+    import main as main_mod
+    from app.rag.ingestion import IngestResult
+
+    def _fake_ingest(ticker, store, *, force=False):
+        if ticker == "AAPL":
+            return IngestResult(
+                ticker="AAPL",
+                accession_number="0000320193-24-000123",
+                chunks_ingested=37,
+                sections=["risk_factors", "business_overview"],
+                skipped=False,
+            )
+        if ticker == "MSFT":
+            return IngestResult(
+                ticker="MSFT",
+                accession_number="",
+                chunks_ingested=0,
+                sections=[],
+                skipped=True,
+            )
+        raise AssertionError(f"unexpected ticker: {ticker}")
+
+    # Avoid touching real Chroma on disk.
+    monkeypatch.setattr(main_mod, "_default_store", lambda: object())
+    monkeypatch.setattr(main_mod, "ingest_latest_10k_if_missing", _fake_ingest)
+
+    client = TestClient(main_mod.app)
+    r = client.post(
+        "/api/filings/ingest",
+        json={"tickers": ["aapl", "MSFT", "bad!!"]},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    results = {item["ticker"]: item for item in body["results"]}
+
+    assert results["AAPL"]["status"] == "ok"
+    assert results["AAPL"]["chunks_ingested"] == 37
+    assert results["AAPL"]["accession_number"] == "0000320193-24-000123"
+
+    assert results["MSFT"]["status"] == "skipped"
+    assert results["MSFT"]["chunks_ingested"] == 0
+
+    # Invalid ticker is preserved verbatim (not normalized) and flagged failed.
+    assert results["bad!!"]["status"] == "failed"
+    assert "not a valid symbol" in results["bad!!"]["error"]
+
+
+def test_filings_ingest_endpoint_requires_tickers():
+    import main as main_mod
+
+    client = TestClient(main_mod.app)
+    r = client.post("/api/filings/ingest", json={"tickers": []})
+    assert r.status_code == 422

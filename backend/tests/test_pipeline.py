@@ -258,10 +258,26 @@ def _default_router() -> RoutingStubLLM:
 # ---------------------------------------------------------------------------
 
 
+class _FakeStore:
+    """Minimal ``ChromaStore``-shaped stub used by the pipeline tests.
+
+    Only ``has_ticker`` is touched by the pipeline; retrieval and ingestion
+    are patched at the module boundary below.
+    """
+
+    def __init__(self, *, has_ticker: bool = False) -> None:
+        self._has_ticker = has_ticker
+        self.has_ticker_calls: list[str] = []
+
+    def has_ticker(self, ticker: str) -> bool:
+        self.has_ticker_calls.append(ticker)
+        return self._has_ticker
+
+
 @pytest.fixture
 def mock_store():
-    """Opaque stand-in - ingest + retrieve are patched so the store is never touched."""
-    return object()
+    """Fake store that reports "nothing ingested yet" by default."""
+    return _FakeStore(has_ticker=False)
 
 
 @pytest.fixture
@@ -274,7 +290,7 @@ def happy_path(monkeypatch, mock_store):
     monkeypatch.setattr(pipeline_mod, "fetch_macro_bundle", lambda: _indicators())
     monkeypatch.setattr(
         pipeline_mod,
-        "ingest_latest_10k",
+        "ingest_latest_10k_if_missing",
         lambda ticker, store: None,
     )
     monkeypatch.setattr(
@@ -328,7 +344,7 @@ def test_pipeline_price_tool_failure_produces_failed_envelope(
     monkeypatch.setattr(pipeline_mod, "fetch_price_metrics", _boom)
     monkeypatch.setattr(pipeline_mod, "search_ticker_news", lambda t: _articles())
     monkeypatch.setattr(pipeline_mod, "fetch_macro_bundle", lambda: _indicators())
-    monkeypatch.setattr(pipeline_mod, "ingest_latest_10k", lambda t, s: None)
+    monkeypatch.setattr(pipeline_mod, "ingest_latest_10k_if_missing", lambda t, s: None)
     monkeypatch.setattr(
         pipeline_mod, "retrieve_filing_context", lambda s, t: [_retrieved_chunk()]
     )
@@ -354,7 +370,7 @@ def test_pipeline_news_no_data_still_runs_specialist(monkeypatch, mock_store):
     monkeypatch.setattr(pipeline_mod, "fetch_price_metrics", lambda t: _metrics())
     monkeypatch.setattr(pipeline_mod, "search_ticker_news", _no_data)
     monkeypatch.setattr(pipeline_mod, "fetch_macro_bundle", lambda: _indicators())
-    monkeypatch.setattr(pipeline_mod, "ingest_latest_10k", lambda t, s: None)
+    monkeypatch.setattr(pipeline_mod, "ingest_latest_10k_if_missing", lambda t, s: None)
     monkeypatch.setattr(
         pipeline_mod, "retrieve_filing_context", lambda s, t: [_retrieved_chunk()]
     )
@@ -410,7 +426,7 @@ def test_pipeline_filings_no_chunks_yields_no_data_envelope(
     monkeypatch.setattr(pipeline_mod, "fetch_price_metrics", lambda t: _metrics())
     monkeypatch.setattr(pipeline_mod, "search_ticker_news", lambda t: _articles())
     monkeypatch.setattr(pipeline_mod, "fetch_macro_bundle", lambda: _indicators())
-    monkeypatch.setattr(pipeline_mod, "ingest_latest_10k", lambda t, s: None)
+    monkeypatch.setattr(pipeline_mod, "ingest_latest_10k_if_missing", lambda t, s: None)
     monkeypatch.setattr(pipeline_mod, "retrieve_filing_context", lambda s, t: [])
 
     payload = run_specialist_pipeline(
@@ -433,3 +449,94 @@ def test_coordinator_bridge_prompt_contains_all_four_envelopes(happy_path):
     for label in ("### PRICE", "### FILINGS", "### NEWS", "### MACRO"):
         assert label in user
     assert payload.correlation_id in user
+
+
+# ---------------------------------------------------------------------------
+# Ingestion-skipping behaviour (speed optimization)
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_skips_10k_ingest_when_ticker_already_in_store(monkeypatch):
+    """Hot path: when store.has_ticker is True, we must NOT hit SEC EDGAR."""
+    import app.services.pipeline as pipeline_mod
+
+    ingest_calls: list[str] = []
+
+    def _spy_ingest(ticker, store):
+        ingest_calls.append(ticker)
+
+    monkeypatch.setattr(pipeline_mod, "fetch_price_metrics", lambda t: _metrics())
+    monkeypatch.setattr(pipeline_mod, "search_ticker_news", lambda t: _articles())
+    monkeypatch.setattr(pipeline_mod, "fetch_macro_bundle", lambda: _indicators())
+    monkeypatch.setattr(pipeline_mod, "ingest_latest_10k_if_missing", _spy_ingest)
+    monkeypatch.setattr(
+        pipeline_mod, "retrieve_filing_context", lambda s, t: [_retrieved_chunk()]
+    )
+
+    cached_store = _FakeStore(has_ticker=True)
+    payload = run_specialist_pipeline(
+        "AAPL", llm=_default_router(), store=cached_store
+    )
+
+    assert ingest_calls == [], "must not attempt ingestion when cached"
+    assert cached_store.has_ticker_calls == ["AAPL"]
+    assert payload.filings.status is AgentStatus.OK
+
+
+def test_pipeline_ingests_when_ticker_missing_from_store(monkeypatch):
+    """Cold path: when the ticker is unknown, we DO call the ingester."""
+    import app.services.pipeline as pipeline_mod
+
+    ingest_calls: list[str] = []
+
+    def _spy_ingest(ticker, store):
+        ingest_calls.append(ticker)
+
+    monkeypatch.setattr(pipeline_mod, "fetch_price_metrics", lambda t: _metrics())
+    monkeypatch.setattr(pipeline_mod, "search_ticker_news", lambda t: _articles())
+    monkeypatch.setattr(pipeline_mod, "fetch_macro_bundle", lambda: _indicators())
+    monkeypatch.setattr(pipeline_mod, "ingest_latest_10k_if_missing", _spy_ingest)
+    monkeypatch.setattr(
+        pipeline_mod, "retrieve_filing_context", lambda s, t: [_retrieved_chunk()]
+    )
+
+    cold_store = _FakeStore(has_ticker=False)
+    run_specialist_pipeline("AAPL", llm=_default_router(), store=cold_store)
+
+    assert ingest_calls == ["AAPL"]
+
+
+def test_pipeline_read_only_mode_returns_no_data_without_ingesting(monkeypatch):
+    """FILINGS_READ_ONLY=true: missing ticker -> NO_DATA envelope, no EDGAR hit."""
+    import app.services.pipeline as pipeline_mod
+    from app.config import get_settings
+
+    # Flip the setting for this test; restore afterwards.
+    settings = get_settings()
+    monkeypatch.setattr(settings, "filings_read_only", True)
+
+    ingest_calls: list[str] = []
+
+    def _spy_ingest(ticker, store):
+        ingest_calls.append(ticker)
+
+    monkeypatch.setattr(pipeline_mod, "fetch_price_metrics", lambda t: _metrics())
+    monkeypatch.setattr(pipeline_mod, "search_ticker_news", lambda t: _articles())
+    monkeypatch.setattr(pipeline_mod, "fetch_macro_bundle", lambda: _indicators())
+    monkeypatch.setattr(pipeline_mod, "ingest_latest_10k_if_missing", _spy_ingest)
+    monkeypatch.setattr(
+        pipeline_mod, "retrieve_filing_context", lambda s, t: [_retrieved_chunk()]
+    )
+
+    cold_store = _FakeStore(has_ticker=False)
+    payload = run_specialist_pipeline(
+        "AAPL", llm=_default_router(), store=cold_store
+    )
+
+    assert ingest_calls == []
+    assert payload.filings.status is AgentStatus.NO_DATA
+    assert "read-only" in payload.filings.errors[0]
+    # Other specialists are unaffected by filings read-only mode.
+    assert payload.price.status is AgentStatus.OK
+    assert payload.news.status is AgentStatus.OK
+    assert payload.macro.status is AgentStatus.OK

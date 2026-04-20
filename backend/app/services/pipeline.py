@@ -43,7 +43,7 @@ from app.agents.specialists import (
 )
 from app.config import get_settings
 from app.rag.chroma_store import ChromaStore
-from app.rag.ingestion import ingest_latest_10k
+from app.rag.ingestion import ingest_latest_10k_if_missing
 from app.schemas.common import AgentName, AgentStatus
 from app.schemas.filings import FilingsFindings
 from app.schemas.macro import MacroDigest
@@ -235,15 +235,38 @@ def _run_macro_domain(ticker: str, llm: LLMClient) -> MacroAgentOutput:
 
 
 def _run_filings_domain(ticker: str, llm: LLMClient, store: ChromaStore) -> FilingsAgentOutput:
+    # Hot-path optimization: skip the 10-K download / chunk / embed cycle when
+    # this ticker is already in the store. ``ingest_latest_10k_if_missing``
+    # does a cheap metadata lookup before deciding whether to touch EDGAR.
+    #
+    # When ``FILINGS_READ_ONLY`` is set (production mode with a scheduled
+    # pre-ingestion job) we never ingest on demand: if the ticker isn't in
+    # the store we return a NO_DATA envelope so the coordinator can note the
+    # gap explicitly instead of blocking the request on a multi-second
+    # ingestion.
+    settings = get_settings()
     try:
-        ingest_latest_10k(ticker, store)
-    except NoDataError as e:
-        return _failed_filings(
-            ticker, f"no 10-K available: {e}", status=AgentStatus.NO_DATA
-        )
-    except ToolError as e:
-        logger.warning("filings ingestion failed for %s: %s", ticker, e)
-        return _failed_filings(ticker, f"filings ingestion failed: {e}")
+        already_present = store.has_ticker(ticker)
+    except Exception:  # noqa: BLE001
+        logger.exception("store.has_ticker failed for %s", ticker)
+        already_present = False
+
+    if not already_present:
+        if settings.filings_read_only:
+            return _failed_filings(
+                ticker,
+                "filings read-only mode: ticker not pre-ingested into ChromaDB",
+                status=AgentStatus.NO_DATA,
+            )
+        try:
+            ingest_latest_10k_if_missing(ticker, store)
+        except NoDataError as e:
+            return _failed_filings(
+                ticker, f"no 10-K available: {e}", status=AgentStatus.NO_DATA
+            )
+        except ToolError as e:
+            logger.warning("filings ingestion failed for %s: %s", ticker, e)
+            return _failed_filings(ticker, f"filings ingestion failed: {e}")
 
     chunks = retrieve_filing_context(store, ticker)
     if not chunks:

@@ -22,6 +22,7 @@ class IngestResult:
     accession_number: str
     chunks_ingested: int
     sections: list[str]
+    skipped: bool = False  # True when the store already had this ticker and we short-circuited.
 
 
 def _chunks_from_document(doc: FilingDocument) -> list[FilingChunk]:
@@ -62,6 +63,47 @@ def ingest_filing_document(store: ChromaStore, doc: FilingDocument) -> IngestRes
 
 
 def ingest_latest_10k(ticker: str, store: ChromaStore) -> IngestResult:
-    """Fetch the latest 10-K for ``ticker`` and ingest it."""
+    """Fetch the latest 10-K for ``ticker`` and ingest it (unconditionally)."""
     doc = fetch_latest_10k(ticker)
     return ingest_filing_document(store, doc)
+
+
+def ingest_latest_10k_if_missing(
+    ticker: str,
+    store: ChromaStore,
+    *,
+    force: bool = False,
+) -> IngestResult:
+    """Ingest the latest 10-K only when the store has no chunks for ``ticker``.
+
+    This is the hot-path entry point called from the request pipeline: it
+    avoids re-downloading / re-chunking / re-embedding a 10-K we already have.
+
+    Parameters
+    ----------
+    ticker
+        Ticker symbol (case-insensitive).
+    store
+        Target ``ChromaStore``.
+    force
+        When ``True``, bypass the cache check and always re-ingest. Useful
+        for operator-triggered refreshes (e.g. after a new 10-K is filed).
+
+    Returns
+    -------
+    IngestResult
+        If the store already had the ticker and ``force`` is ``False``, the
+        result has ``skipped=True`` and ``chunks_ingested=0``; otherwise it
+        mirrors :func:`ingest_latest_10k`.
+    """
+    symbol = (ticker or "").strip().upper()
+    if not force and store.has_ticker(symbol):
+        logger.info("skipping 10-K ingest for %s (already in store)", symbol)
+        return IngestResult(
+            ticker=symbol,
+            accession_number="",
+            chunks_ingested=0,
+            sections=[],
+            skipped=True,
+        )
+    return ingest_latest_10k(symbol, store)

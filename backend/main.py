@@ -14,8 +14,13 @@ from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 
-from app.services.pipeline import CoordinatorPayload, run_specialist_pipeline
-from app.tools.base import InvalidInputError
+from app.rag.ingestion import ingest_latest_10k_if_missing
+from app.services.pipeline import (
+    CoordinatorPayload,
+    _default_store,
+    run_specialist_pipeline,
+)
+from app.tools.base import InvalidInputError, ToolError, validate_ticker
 from crew_logic import run_crew_in_background
 from schemas import TraceEvent
 from tracing import emit_trace
@@ -57,6 +62,33 @@ class ResearchRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     service: str = "investabull-backend"
+
+
+class IngestRequest(BaseModel):
+    tickers: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description="List of ticker symbols to pre-ingest into ChromaDB.",
+        examples=[["AAPL", "MSFT", "NVDA"]],
+    )
+    force: bool = Field(
+        default=False,
+        description="Re-ingest even if the ticker already has chunks in Chroma.",
+    )
+
+
+class IngestResultItem(BaseModel):
+    ticker: str
+    status: str = Field(..., description="ok | skipped | failed")
+    chunks_ingested: int = 0
+    sections: list[str] = Field(default_factory=list)
+    accession_number: str | None = None
+    error: str | None = None
+
+
+class IngestResponse(BaseModel):
+    results: list[IngestResultItem]
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -128,6 +160,54 @@ def create_app() -> FastAPI:
                 yield emit_trace(event=item)
 
         return StreamingResponse(stream_events(), media_type="text/event-stream")
+
+    @app.post(
+        "/api/filings/ingest",
+        response_model=IngestResponse,
+        tags=["filings"],
+        summary="Pre-ingest latest 10-K filings into ChromaDB for one or more tickers.",
+        description=(
+            "Intended for scheduled/background use (cron, systemd timer, CI, etc.). "
+            "Pre-ingesting keeps the /research hot path free of the multi-second 10-K "
+            "download + chunk + embed work. Pairs with FILINGS_READ_ONLY=true on the "
+            "server, which makes /research only ever query Chroma."
+        ),
+    )
+    async def api_filings_ingest(req: IngestRequest) -> IngestResponse:
+        def _do_ingest() -> list[IngestResultItem]:
+            store = _default_store()
+            out: list[IngestResultItem] = []
+            for raw in req.tickers:
+                try:
+                    symbol = validate_ticker(raw)
+                except InvalidInputError as e:
+                    out.append(
+                        IngestResultItem(ticker=raw, status="failed", error=str(e))
+                    )
+                    continue
+                try:
+                    result = ingest_latest_10k_if_missing(
+                        symbol, store, force=req.force
+                    )
+                except ToolError as e:
+                    out.append(
+                        IngestResultItem(ticker=symbol, status="failed", error=str(e))
+                    )
+                    continue
+                status = "skipped" if result.skipped else "ok"
+                out.append(
+                    IngestResultItem(
+                        ticker=symbol,
+                        status=status,
+                        chunks_ingested=result.chunks_ingested,
+                        sections=result.sections,
+                        accession_number=result.accession_number or None,
+                    )
+                )
+            return out
+
+        results = await asyncio.to_thread(_do_ingest)
+        return IngestResponse(results=results)
 
     return app
 
