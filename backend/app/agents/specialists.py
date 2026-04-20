@@ -37,6 +37,7 @@ from pydantic import BaseModel
 from app.agents.llm import GeminiLLMClient, LLMClient
 from app.agents.parsers import AgentOutputError, parse_agent_output
 from app.agents.prompts import load_prompt
+from app.config import get_settings
 from app.rag.chroma_store import ChromaStore
 from app.rag.retrieval import RetrievedChunk, query_filings
 from app.schemas.common import AgentName
@@ -152,6 +153,35 @@ def run_price_specialist(
 # ---------------------------------------------------------------------------
 
 
+def _compact_article_payload(
+    article: NewsItem,
+    *,
+    include_snippet: bool,
+    snippet_chars: int,
+) -> dict:
+    """Render a NewsItem to a compact dict for the LLM payload.
+
+    ``snippet`` is the dominant token-cost contributor (up to 1500 chars each
+    in the raw tool output); dropping or tightly truncating it is the single
+    biggest latency win for the News specialist.
+    """
+    payload: dict = {
+        "title": article.title,
+        "url": str(article.url) if article.url is not None else None,
+        "source": article.source,
+        "published_at": (
+            article.published_at.isoformat() if article.published_at else None
+        ),
+        "relevance_score": article.relevance_score,
+    }
+    if include_snippet and article.snippet:
+        if snippet_chars > 0 and len(article.snippet) > snippet_chars:
+            payload["snippet"] = article.snippet[: snippet_chars - 1].rstrip() + "\u2026"
+        else:
+            payload["snippet"] = article.snippet
+    return payload
+
+
 def run_news_specialist(
     ticker: str,
     articles: list[NewsItem],
@@ -159,13 +189,53 @@ def run_news_specialist(
     window_days: int = 14,
     llm: LLMClient | None = None,
     max_retries: int = 1,
+    max_articles: int | None = None,
+    include_snippet: bool | None = None,
+    snippet_chars: int | None = None,
 ) -> NewsAgentOutput:
-    """Classify sentiment / themes / risks across recent news articles."""
+    """Classify sentiment / themes / risks across recent news articles.
+
+    The raw article list is *trimmed before it reaches the LLM*: we keep the
+    top ``max_articles`` by ``relevance_score`` and either drop or truncate
+    the per-article ``snippet``. Defaults come from :class:`Settings`
+    (``NEWS_LLM_MAX_ARTICLES``, ``NEWS_LLM_INCLUDE_SNIPPET``,
+    ``NEWS_LLM_SNIPPET_CHARS``). Pass explicit kwargs to override per-call.
+    """
     llm = llm or _default_llm()
     t0 = time.monotonic()
+
+    settings = get_settings()
+    effective_max = int(
+        max_articles if max_articles is not None else settings.news_llm_max_articles
+    )
+    effective_include_snippet = (
+        include_snippet
+        if include_snippet is not None
+        else settings.news_llm_include_snippet
+    )
+    effective_snippet_chars = int(
+        snippet_chars if snippet_chars is not None else settings.news_llm_snippet_chars
+    )
+
+    # Top-N by relevance (None sorts last). Stable order keeps prompts reproducible.
+    ranked = sorted(
+        articles,
+        key=lambda a: (a.relevance_score if a.relevance_score is not None else -1.0),
+        reverse=True,
+    )
+    trimmed = ranked[: max(0, effective_max)] if effective_max > 0 else ranked
+
     tool_data = {
         "window_days": int(window_days),
-        "articles": [a.model_dump(mode="json") for a in articles],
+        "total_articles_available": len(articles),
+        "articles": [
+            _compact_article_payload(
+                a,
+                include_snippet=effective_include_snippet,
+                snippet_chars=effective_snippet_chars,
+            )
+            for a in trimmed
+        ],
     }
     out = _run(llm, "news", ticker, tool_data, NewsAgentOutput, max_retries=max_retries)
     return _stamp(out, agent_name=AgentName.NEWS, llm=llm, t0=t0)

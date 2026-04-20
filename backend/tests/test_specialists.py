@@ -354,6 +354,86 @@ def test_run_news_specialist_happy():
     assert "earnings_beat" in out.findings.themes
 
 
+def test_run_news_specialist_drops_snippets_by_default():
+    """By default snippet is omitted from the LLM payload (token saver)."""
+    import json as _json
+
+    llm = StubLLM(_news_response())
+    heavy_articles = [
+        NewsItem(
+            title="Apple beats Q1 estimates",
+            url="https://www.reuters.com/aapl-beat",
+            source="reuters.com",
+            snippet="X" * 1200,  # deliberately huge
+            sentiment=SentimentLabel.NEUTRAL,
+            relevance_score=0.9,
+        ),
+    ]
+
+    run_news_specialist("AAPL", heavy_articles, llm=llm)
+    user_payload = llm.calls[0]["user"]
+    # snippet must not be serialized into the prompt
+    assert '"snippet"' not in user_payload
+    assert "XXXXX" not in user_payload
+    # Sanity: articles were still sent
+    assert '"articles"' in user_payload
+    parsed = _json.loads(user_payload.split("\n\n", 1)[1])
+    assert parsed["tool_data"]["articles"][0]["title"] == "Apple beats Q1 estimates"
+    assert parsed["tool_data"]["total_articles_available"] == 1
+
+
+def test_run_news_specialist_trims_to_top_n_by_relevance():
+    """Only the top-N articles by relevance_score reach the LLM."""
+    import json as _json
+
+    llm = StubLLM(_news_response())
+    many = [
+        NewsItem(
+            title=f"Article {i}",
+            url=f"https://example.com/a{i}",
+            source="example.com",
+            sentiment=SentimentLabel.NEUTRAL,
+            relevance_score=float(i) / 10.0,
+        )
+        for i in range(10)
+    ]
+
+    run_news_specialist("AAPL", many, llm=llm, max_articles=3)
+    parsed = _json.loads(llm.calls[0]["user"].split("\n\n", 1)[1])
+    titles = [a["title"] for a in parsed["tool_data"]["articles"]]
+    # highest-relevance first, top 3 only
+    assert titles == ["Article 9", "Article 8", "Article 7"]
+    assert parsed["tool_data"]["total_articles_available"] == 10
+
+
+def test_run_news_specialist_include_snippet_truncates():
+    """include_snippet=True truncates to snippet_chars with an ellipsis."""
+    import json as _json
+
+    llm = StubLLM(_news_response())
+    articles = [
+        NewsItem(
+            title="Big story",
+            url="https://www.reuters.com/big",
+            source="reuters.com",
+            snippet="A" * 500,
+            sentiment=SentimentLabel.NEUTRAL,
+            relevance_score=0.8,
+        ),
+    ]
+    run_news_specialist(
+        "AAPL",
+        articles,
+        llm=llm,
+        include_snippet=True,
+        snippet_chars=50,
+    )
+    parsed = _json.loads(llm.calls[0]["user"].split("\n\n", 1)[1])
+    snippet = parsed["tool_data"]["articles"][0]["snippet"]
+    assert len(snippet) == 50
+    assert snippet.endswith("\u2026")
+
+
 def test_run_macro_specialist_happy():
     llm = StubLLM(_macro_response())
     out = run_macro_specialist("AAPL", _macro_indicators(), llm=llm)

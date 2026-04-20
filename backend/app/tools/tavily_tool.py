@@ -8,6 +8,8 @@ agent's job so we never mix retrieval with reasoning.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
@@ -29,6 +31,54 @@ from app.tools.base import (
 logger = logging.getLogger(__name__)
 
 _SNIPPET_MAX = 1_500  # keep in lockstep with NewsItem.snippet max_length
+
+
+# ---------------------------------------------------------------------------
+# In-memory TTL cache for Tavily results
+#
+# News doesn't need to be re-fetched on every /research call for the same
+# ticker: Tavily charges per query and adds multi-second latency even for
+# repeat hits. A short TTL per (ticker, params) key wipes the bulk of that
+# cost when users retry quickly or when multiple agents / workers hit the
+# same ticker in a short window.
+#
+# Safe for our threaded pipeline: a single ``threading.Lock`` guards the
+# dict. For multi-worker deploys (gunicorn, uvicorn --workers >1) this only
+# dedupes within a single process; swap for Redis if you need shared state.
+# ---------------------------------------------------------------------------
+
+_CacheKey = tuple[str, int, int, str, str]
+_CacheEntry = tuple[float, list[NewsItem]]
+
+_news_cache: dict[_CacheKey, _CacheEntry] = {}
+_news_cache_lock = threading.Lock()
+
+
+def _cache_get(key: _CacheKey, ttl: int) -> list[NewsItem] | None:
+    if ttl <= 0:
+        return None
+    now = time.monotonic()
+    with _news_cache_lock:
+        entry = _news_cache.get(key)
+        if not entry:
+            return None
+        ts, items = entry
+        if now - ts > ttl:
+            _news_cache.pop(key, None)
+            return None
+        # Shallow-copy list so callers mutating it don't corrupt the cache.
+        return list(items)
+
+
+def _cache_put(key: _CacheKey, items: list[NewsItem]) -> None:
+    with _news_cache_lock:
+        _news_cache[key] = (time.monotonic(), list(items))
+
+
+def clear_news_cache() -> None:
+    """Drop all cached Tavily results. Exposed for tests and manual refreshes."""
+    with _news_cache_lock:
+        _news_cache.clear()
 
 
 def _parse_published(v: Any) -> datetime | None:
@@ -75,10 +125,20 @@ def search_ticker_news(
     ticker: str,
     *,
     company_name: str | None = None,
-    max_results: int = 10,
-    days_back: int = 14,
+    max_results: int | None = None,
+    days_back: int | None = None,
+    search_depth: str | None = None,
 ) -> list[NewsItem]:
     """Return recent news articles relevant to ``ticker``.
+
+    All tuning knobs (``max_results``, ``days_back``, ``search_depth``) default
+    to the values in :class:`app.config.Settings` so operators can retune news
+    speed without code changes. Call with explicit kwargs to override for a
+    single call.
+
+    Results are cached in-process for ``TAVILY_CACHE_TTL_SECONDS`` (0 disables
+    caching) keyed on ``(ticker, days_back, max_results, company_name,
+    search_depth)`` so repeat requests within the TTL skip the network call.
 
     Raises
     ------
@@ -91,15 +151,33 @@ def search_ticker_news(
     NoDataError
         If no articles match the query.
     """
+    settings = get_settings()
+
     symbol = validate_ticker(ticker)
-    if not (1 <= int(max_results) <= 50):
+    effective_max = int(max_results if max_results is not None else settings.tavily_max_results)
+    effective_days = int(days_back if days_back is not None else settings.tavily_days_back)
+    effective_depth = (search_depth or settings.tavily_search_depth or "basic").lower()
+    if effective_depth not in {"basic", "advanced"}:
+        raise InvalidInputError("search_depth must be 'basic' or 'advanced'")
+    if not (1 <= effective_max <= 50):
         raise InvalidInputError("max_results must be in [1, 50]")
-    if not (1 <= int(days_back) <= 90):
+    if not (1 <= effective_days <= 90):
         raise InvalidInputError("days_back must be in [1, 90]")
 
-    settings = get_settings()
     if not settings.tavily_api_key:
         raise UpstreamAPIError("TAVILY_API_KEY is not configured")
+
+    cache_key: _CacheKey = (
+        symbol,
+        effective_days,
+        effective_max,
+        (company_name or "").strip().lower(),
+        effective_depth,
+    )
+    cached = _cache_get(cache_key, settings.tavily_cache_ttl_seconds)
+    if cached is not None:
+        logger.debug("news cache hit for %s", symbol)
+        return cached
 
     client = TavilyClient(api_key=settings.tavily_api_key)
 
@@ -112,10 +190,10 @@ def search_ticker_news(
     try:
         resp = client.search(
             query=query,
-            search_depth="advanced",
+            search_depth=effective_depth,
             topic="news",
-            days=int(days_back),
-            max_results=int(max_results),
+            days=effective_days,
+            max_results=effective_max,
         )
     except Exception as e:
         msg = str(e).lower()
@@ -150,4 +228,6 @@ def search_ticker_news(
 
     if not items:
         raise NoDataError(f"Tavily returned no articles for {symbol}")
+
+    _cache_put(cache_key, items)
     return items

@@ -59,6 +59,79 @@ class Settings(BaseSettings):
         ),
     )
 
+    # News / Tavily speed tuning
+    tavily_search_depth: str = Field(
+        default="basic",
+        alias="TAVILY_SEARCH_DEPTH",
+        description="Tavily search_depth: 'basic' (fast) or 'advanced' (slower, richer).",
+    )
+    tavily_max_results: int = Field(
+        default=5,
+        alias="TAVILY_MAX_RESULTS",
+        description="Max Tavily articles per query. Lower = faster + smaller LLM payload.",
+    )
+    tavily_days_back: int = Field(
+        default=7,
+        alias="TAVILY_DAYS_BACK",
+        description="Tavily news recency window in days.",
+    )
+    tavily_cache_ttl_seconds: int = Field(
+        default=600,
+        alias="TAVILY_CACHE_TTL_SECONDS",
+        description=(
+            "TTL for in-memory Tavily result cache. 0 disables caching. "
+            "Cache key: (ticker, days_back, max_results, company_name, search_depth)."
+        ),
+    )
+    news_llm_max_articles: int = Field(
+        default=5,
+        alias="NEWS_LLM_MAX_ARTICLES",
+        description=(
+            "Keep at most this many articles (top by relevance_score) before "
+            "sending to the News specialist LLM."
+        ),
+    )
+    news_llm_include_snippet: bool = Field(
+        default=False,
+        alias="NEWS_LLM_INCLUDE_SNIPPET",
+        description=(
+            "When false, article snippets are dropped from the News LLM payload "
+            "(saves hundreds to thousands of tokens per request)."
+        ),
+    )
+    news_llm_snippet_chars: int = Field(
+        default=300,
+        alias="NEWS_LLM_SNIPPET_CHARS",
+        description="Max chars per snippet when news_llm_include_snippet=true.",
+    )
+
+    # Macro / FRED speed tuning
+    fred_max_workers: int = Field(
+        default=4,
+        alias="FRED_MAX_WORKERS",
+        description=(
+            "Thread pool size for parallelizing FRED series fetches inside "
+            "fetch_macro_bundle. 0 or 1 forces sequential fetch."
+        ),
+    )
+    fred_bundle_cache_ttl_seconds: int = Field(
+        default=6 * 3600,
+        alias="FRED_BUNDLE_CACHE_TTL_SECONDS",
+        description=(
+            "TTL for the in-memory macro-bundle cache, keyed on the tuple of "
+            "series ids. FRED indicators are daily/weekly/monthly so a multi-hour "
+            "TTL removes almost all macro latency across requests. 0 disables."
+        ),
+    )
+    fred_series_info_cache_ttl_seconds: int = Field(
+        default=24 * 3600,
+        alias="FRED_SERIES_INFO_CACHE_TTL_SECONDS",
+        description=(
+            "TTL for cached FRED series metadata (title/units/frequency). "
+            "Metadata almost never changes so a 24h default is safe. 0 disables."
+        ),
+    )
+
     # Runtime
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     http_timeout_seconds: float = Field(default=20.0, alias="HTTP_TIMEOUT_SECONDS")
