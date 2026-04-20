@@ -1,20 +1,34 @@
-# Core API
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
-python-dotenv>=1.0.0
-pydantic-settings>=2.0.0
-python-multipart>=0.0.9
-httpx>=0.27.0
+# --- Web / API ---
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32,<1.0
+pydantic>=2.9,<3.0
+pydantic-settings>=2.6,<3.0
+python-dotenv>=1.0,<2.0
+python-multipart>=0.0.9,<1.0
+httpx>=0.27,<1.0
+tenacity>=9.0,<10.0
 
-# Multi-agent orchestration & LLM integrations
-crewai>=0.86.0
-langchain-core>=0.3.0
-langchain-community>=0.3.0
-langchain-google-genai>=2.0.0
-langchain-anthropic>=0.3.0
+# --- Orchestration / LLMs ---
+crewai>=0.86,<1.0
+google-generativeai>=0.8,<1.0
+anthropic>=0.40,<1.0
+langchain-core>=0.3,<1.0
+langchain-community>=0.3,<1.0
+langchain-google-genai>=2.0,<3.0
+langchain-anthropic>=0.3,<1.0
 
-# Data & RAG (per project README)
-chromadb>=0.5.0
-yfinance>=0.2.0
-tavily-python>=0.5.0
-fredapi>=0.5.0
+# --- Market / economic data ---
+yfinance>=0.2.50,<1.0
+tavily-python>=0.5.0,<1.0
+fredapi>=0.5.2,<1.0
+
+# --- SEC filings + RAG ---
+sec-edgar-downloader>=5.0,<6.0
+beautifulsoup4>=4.12,<5.0
+lxml>=5.0,<6.0
+chromadb>=0.5.20,<1.0
+sentence-transformers>=3.0,<4.0
+
+# --- Dev / test ---
+pytest>=8.3,<9.0
+pytest-asyncio>=0.24,<1.0

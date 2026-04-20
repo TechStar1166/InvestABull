@@ -1,0 +1,96 @@
+@import "tailwindcss";
+
+:root {
+  --background: #020617;
+  --foreground: #e2e8f0;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+}
+
+.loading-bar {
+  animation: loading-slide 2.1s ease-in-out infinite;
+}
+
+@keyframes loading-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(70%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+.memo {
+  font-size: 1rem;
+  line-height: 1.78;
+  color: #0f172a;
+}
+
+.memo h1,
+.memo h2,
+.memo h3,
+.memo h4 {
+  font-family: Georgia, Cambria, "Times New Roman", Times, serif;
+  letter-spacing: -0.01em;
+  color: #020617;
+  margin-top: 1.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.memo h1 {
+  font-size: 2rem;
+}
+
+.memo h2 {
+  font-size: 1.55rem;
+}
+
+.memo h3 {
+  font-size: 1.22rem;
+}
+
+.memo p {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.memo ul,
+.memo ol {
+  margin: 0.75rem 0;
+  padding-left: 1.4rem;
+}
+
+.memo li {
+  margin: 0.35rem 0;
+}
+
+.memo blockquote {
+  border-left: 3px solid #94a3b8;
+  margin: 1rem 0;
+  padding-left: 0.9rem;
+  color: #334155;
+}
+
+.memo code {
+  background: #e2e8f0;
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+}
