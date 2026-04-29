@@ -12,27 +12,6 @@ from app.tools.base import InvalidInputError
 from schemas import TraceEvent
 
 
-def run_research(ticker: str) -> dict:
-    """Compatibility wrapper for non-streaming endpoint callers."""
-    payload = run_specialist_pipeline(ticker)
-    memo, used_claude, model_used = synthesize_coordinator_markdown(payload)
-    return {
-        "memo": memo,
-        "trace_logs": [
-            {
-                "agent": "System",
-                "status": "Pipeline + coordinator complete.",
-                "meta": {
-                    "correlation_id": payload.correlation_id,
-                    "claude": used_claude,
-                    "anthropic_model": model_used,
-                },
-            }
-        ],
-        "payload": payload.model_dump(mode="json"),
-    }
-
-
 async def run_crew_in_background(ticker: str, queue: Queue[TraceEvent | None]) -> None:
     """
     Run specialists (Gemini) then Claude coordinator; stream TraceEvents.
@@ -52,7 +31,7 @@ async def run_crew_in_background(ticker: str, queue: Queue[TraceEvent | None]) -
     def emit_from_thread(event: TraceEvent) -> None:
         asyncio.run_coroutine_threadsafe(queue.put(event), loop)
 
-    def run_sync_pipeline() -> tuple[CoordinatorPayload, str, bool]:
+    def run_sync_pipeline() -> tuple[CoordinatorPayload, str, bool, str | None]:
         emit_from_thread(
             TraceEvent(
                 stage="orchestration",

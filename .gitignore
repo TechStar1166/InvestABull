@@ -231,3 +231,8 @@ Thumbs.db
 .chroma/
 chroma.sqlite3
 .langchain/
+
+# InvestABull runtime caches (regenerated on demand)
+.sec_cache/
+backend/.sec_cache/
+backend/.chroma/
