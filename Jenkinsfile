@@ -36,7 +36,15 @@ pipeline {
             }
         }
 
-        // STAGE 4: Deploy the application
+        // STAGE 4: Clean up unused Docker resources to free up space
+        stage('Cleanup') {
+            steps {
+                echo 'Pruning dangling Docker images...'
+                sh 'docker image prune -f'
+            }
+        }
+
+        // STAGE 5: Deploy the application
         stage('Deploy') {
             steps {
                 echo 'Deploying the application...'
