@@ -54,8 +54,14 @@ pipeline {
     }
     
     post {
+        success {
+            echo 'Jenkins pipeline completed successfully. Build, verification, cleanup, and deployment finished without errors.'
+        }
+        failure {
+            echo 'Jenkins pipeline failed. Check the console output above to identify the failed stage.'
+        }
         always {
-            echo 'Pipeline execution complete.'
+            echo 'Jenkins pipeline execution finished.'
         }
     }
 }
